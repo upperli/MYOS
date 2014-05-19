@@ -21,44 +21,57 @@ _start:
     rep
     movsw
     ljmp    $INITSEG,$go
-.global _start
+
 go:
     mov     %cs,%ax
     mov     %ax,%ds
     mov     %ax,%es
-
     mov     $STACk_SETUP,%dx   #将栈地址ss:sp设置为0x9000:fef4,据说要将后面12字节保存一些奇怪的东西
     mov     %ax,%ss
     mov     %dx,%sp
 
-
     push    $0
     pop     %fs
     mov     $0x78,%bx
-
     
-    mov     %fs:(%bx),%si
-    inc     %bx
-    mov     %fs:(%bx),%es
+    
+    movw     %fs:(%bx),%si
+    inc      %bx
+    inc      %bx
+    movw     %fs:(%bx),%ds
 
     mov     %dx,%di
     mov     $6,%cx
-    cld
+   # cld
+    
+   # call    DispStr
     
     rep
     movsw
-
+#ds，es被使用过，重新修改
+    mov     %cs,%ax
+    mov     %ax,%ds
+    mov     %ax,%es
+    
     call    DispStr
     jmp     .
 
 DispStr:
+    push    %ax
+    push    %bp
+    push    %cx
+    push    %dx
     mov     $BootMessage,%ax
     mov     %ax,%bp
     mov     $0x10,%cx
     mov     $0x1301,%ax
     mov     $0x00c,%bx
-    mov     $0x0,%dl
+    mov     $0x0,%dx
     int     $0x10
+    pop     %dx
+    pop     %cx
+    pop     %bp
+    pop     %ax
     ret
 BootMessage: .string "Hello,OS world!"
 .org 510
