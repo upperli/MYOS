@@ -12,7 +12,7 @@ STACk_SETUP = 0xfef4
 SETUPLEN = 4
 SYSSIZE = 0x3000
 ENDSEG = SYSSEG + SYSSIZE
-
+ROOT_DEV = 0
 #    ljmp    $BOOTSEG,$_start
 _start:
     mov     $BOOTSEG,%ax
@@ -27,7 +27,6 @@ _start:
     ljmp    $INITSEG,$go
 
 go:
-    call    clear
     mov     %cs,%ax
     mov     %ax,%ds
     mov     %ax,%es
@@ -80,6 +79,8 @@ go:
 #dh = 磁头号    dl = 驱动器号
 #es:bx 指向数据缓冲区 如果出错，CF 置位,ah是出错码
 load_setup:
+    call    clear
+   # call    clear
     xor     %dx,%dx
     mov     $0x0002,%cx
     mov     $0x0200,%bx
@@ -109,11 +110,11 @@ ok_load_setup:
     mov     $INITSEG,%ax #恢复es 
     mov     %ax,%es
 
-    mov     $0x03,%ah
-    xor     %bh,%bh
-    int     $0x10
-
-    mov     $9,%cx
+#    mov     $0x03,%ah
+#    xor     %bh,%bh
+#    int     $0x10
+    mov     $0x1010,%dx  
+    mov     $7,%cx
     mov     $0x0007,%bx
     mov     $0x1301,%ax
     mov     $LOAD_MESSAGE,%bp
@@ -122,11 +123,26 @@ ok_load_setup:
 load_system:
     mov     $SYSSEG,%ax
     mov     %ax,%es
+     
     call    read_it
     call    kill_motor
     call    print_nl
-    
-    jmp     .
+
+    mov     root_dev,%ax
+    or      %ax,%ax
+    jne     root_defined
+    mov     sectors,%bx
+    mov     $0x0208,%ax
+    cmp     $15,%bx
+    je      root_defined
+    mov     $0x021c,%ax
+    cmp     $18,%bx
+    je      root_defined
+undef_root:
+    jmp     undef_root
+root_defined:
+    mov     %ax,root_dev
+    ljmp    $SETUPSEG,$0
 
 read_it:
     mov     %es,%ax
@@ -140,12 +156,12 @@ rp_read:
     jb      ok1_read
     ret
 ok1_read:
-    mov     $sectors,%ax
-    sub     $sread,%ax
+    mov     sectors,%ax
+    sub     sread,%ax
     mov     %ax,%cx
     shl     $9,%cx
     add     %bx,%cx
-    jnc     ok2_read  #无进位时转移应该是上面的加法没有溢出跳转到ok_read执行
+    jnc     ok2_read  #无进位时转移应该是上面的加法没有溢出跳转到ok2_read执行
     je      ok2_read  #若零标志位置位也跳转   理解 bx+cx <= 64K
 #大于64k时执行
     xor     %ax,%ax
@@ -155,44 +171,100 @@ ok1_read:
 ok2_read:
     call    read_track
     mov     %ax,%cx
-    add     $sread,%ax
-    cmp     $sectors,%ax
+    add     sread,%ax
+    cmp     sectors,%ax
     jne     ok3_read    #若还有未读扇区，跳转到ok3_read
     mov     $1,%ax
-    sub     $head,%ax
+    sub     head,%ax
     jne     ok4_read
-#    inc     track
+
+    incw    track
+
 ok4_read:
     mov     %ax,head
     xor     %ax,%ax
 ok3_read:
-kill_motor:
-read_track:
-jmp .
-#显示BOOTMESSAGE 
-DispStr:
-    push    %ax
-    push    %bp
-    push    %cx
-    push    %dx
-    mov     $BootMessage,%ax
-    mov     %ax,%bp
-    mov     $0x10,%cx
-    mov     $0x1301,%ax
-    mov     $0x00c,%bx
-    mov     $0x0,%dx
-    int     $0x10
-    pop     %dx
-    pop     %cx
-    pop     %bp
-    pop     %ax
-    ret
+    mov     %ax,sread
+    shl     $9,%cx
+    add     %cx,%bx
+    jnc     rp_read
 
+    mov     %es,%ax
+    add     $0x10,%ah
+    mov     %ax,%es
+    xor     %bx,%bx
+    jmp     rp_read
+
+kill_motor:
+    push    %dx
+    mov     $0x3f2,%dx
+    xor     %al,%al
+    outSb
+    pop     %dx
+    ret
+read_track:
+    pusha
+    #显示一个.########################
+    pusha
+    mov     $0xe2e,%ax
+    mov     $7,%bx
+    int     $0x10
+    popa
+    ##########################
+    mov     track,%dx
+    mov     sread,%cx
+    inc     %cx
+    mov     %dl,%ch
+    mov     $head,%dx
+    mov     %dl,%dh
+    and     $0x0100,%dx
+    mov     $2,%ah
+    push    %dx
+    push    %cx
+    push    %bx
+    push    %ax
+    int     $0x13
+    jc      bad_rt
+    add     $8,%sp
+    popa
+    ret
+bad_rt:
+    push    %ax
+    call    print_all
+
+    xor     %ah,%ah
+    xor     %dl,%dl
+    int     $0x13
+
+    add     $10,%sp
+    popa
+    jmp     read_track
+
+print_all:
+    mov     $5,%cx
+    mov     %sp,%bp
+print_loop:
+    push    %cx
+    call    print_nl
+    jae     no_reg
+
+
+    mov     $0xe05+0x41-1,%ax
+    sub     %cl,%al
+    int     $0x10
+
+    mov     $0x3a,%al
+    int     $0x10
+
+no_reg:
+    add     $2,%bp
+    call    print_hex
+    pop     %cx
+    loop    print_loop
+    ret
 #清屏
 clear:
-    mov     $0x0600,%ax
-    mov     $24,%dh
-    mov     $79,%dl
+    mov     $0x0003,%ax
     int     $0x10
     ret
 print_nl:
@@ -221,7 +293,7 @@ good_digit:
 BootMessage: 
     .string "Hello,OS world!"
 LOAD_MESSAGE:
-    .string "Loading..."
+    .string "Loading"
 sectors:
     .word   0
 head:
@@ -231,8 +303,11 @@ track:
 sread:  
     .word  1+ SETUPLEN
 
-    .org 510
-    .short 0xaa55 
+    .org 508
+root_dev:
+    .word   ROOT_DEV
+boot_flag:   
+    .word   0xaa55 
     .end
 
 
